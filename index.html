@@ -426,7 +426,15 @@
       spotifyGet('/me/player/currently-playing'),
     ]);
     if (!profile) return;
-    userData = { profile, topTracks, topArtists, recent, playing };
+
+    // Fetch real audio features for top tracks
+    let audioFeatures = null;
+    if (topTracks && topTracks.items && topTracks.items.length) {
+      const ids = topTracks.items.map(t => t.id).join(',');
+      audioFeatures = await spotifyGet('/audio-features?ids=' + ids);
+    }
+
+    userData = { profile, topTracks, topArtists, recent, playing, audioFeatures };
     renderDashboard();
   }
 
@@ -451,6 +459,10 @@
     const avgPop = topTracks && topTracks.items && topTracks.items.length
       ? Math.round(topTracks.items.reduce((s, t) => s + t.popularity, 0) / topTracks.items.length)
       : 0;
+    const avgDurationMs = topTracks && topTracks.items && topTracks.items.length
+      ? topTracks.items.reduce((s, t) => s + (t.duration_ms || 0), 0) / topTracks.items.length
+      : 0;
+    const avgDuration = avgDurationMs ? (avgDurationMs / 60000).toFixed(1) : '—';
 
     let nowPlayingHtml = '';
     if (playing && playing.item) {
@@ -480,7 +492,7 @@
         <div class="period-btns" style="margin-bottom:0">
           <button class="period-btn ${currentPeriod === 'short_term' ? 'active' : ''}" onclick="setPeriod('short_term')">4 semanas</button>
           <button class="period-btn ${currentPeriod === 'medium_term' ? 'active' : ''}" onclick="setPeriod('medium_term')">6 meses</button>
-          <button class="period-btn ${currentPeriod === 'long_term' ? 'active' : ''}" onclick="setPeriod('long_term')">Siempre</button>
+          <button class="period-btn ${currentPeriod === 'long_term' ? 'active' : ''}" onclick="setPeriod('long_term')" title="Datos de los últimos 1-2 años aprox. Es el máximo que ofrece la API de Spotify.">Largo plazo ⓘ</button>
         </div>
         <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
           Mostrar
@@ -569,12 +581,15 @@
       ];
 
       const avgFeatures = {};
-      if (topTracks && topTracks.items) {
-        audioFeatures.forEach(f => {
-          const vals = topTracks.items.map(t => t[f.key] || 0);
+      const featureData = userData.audioFeatures?.audio_features?.filter(Boolean) || [];
+      audioFeatures.forEach(f => {
+        if (featureData.length) {
+          const vals = featureData.map(af => af[f.key] || 0);
           avgFeatures[f.key] = vals.reduce((a, b) => a + b, 0) / vals.length;
-        });
-      }
+        } else {
+          avgFeatures[f.key] = 0;
+        }
+      });
 
       mainContent = `
         <div class="section-title">Géneros favoritos</div>
@@ -617,9 +632,9 @@
           <div class="stat-sub">en recientes</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Popularidad media</div>
-          <div class="stat-value">${avgPop}</div>
-          <div class="stat-sub">en tu top tracks</div>
+          <div class="stat-label">Duración media</div>
+          <div class="stat-value">${avgDuration}</div>
+          <div class="stat-sub">min por canción</div>
         </div>
       </div>
       ${nowPlayingHtml}
