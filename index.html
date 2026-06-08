@@ -263,10 +263,7 @@
     .track-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .track-artist { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 
-    .pop-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
-    .pop-bar-bg { width: 64px; height: 3px; background: var(--bg-tertiary); border-radius: 2px; }
-    .pop-bar { height: 3px; background: var(--green); border-radius: 2px; }
-    .pop-label { font-size: 10px; color: var(--text-tertiary); }
+
 
     .time-label { font-size: 10px; color: var(--text-tertiary); text-align: right; flex-shrink: 0; white-space: nowrap; }
 
@@ -431,7 +428,17 @@
     ]);
     if (!profile) return;
 
-    userData = { profile, topTracks, topArtists, recent, playing };
+    // Enrich artists with full data (includes genres) using /artists endpoint
+    let enrichedTopArtists = topArtists;
+    if (topArtists?.items?.length) {
+      const ids = topArtists.items.map(a => a.id).join(',');
+      const enriched = await spotifyGet('/artists?ids=' + ids);
+      if (enriched?.artists) {
+        enrichedTopArtists = { ...topArtists, items: enriched.artists };
+      }
+    }
+
+    userData = { profile, topTracks, topArtists: enrichedTopArtists, recent, playing };
     renderDashboard();
   }
 
@@ -518,10 +525,7 @@
             <div class="track-name">${t.name}</div>
             <div class="track-artist">${t.artists.map(a => a.name).join(', ')} · ${t.album.name}</div>
           </div>
-          <div class="pop-wrap">
-            <div class="pop-bar-bg"><div class="pop-bar" style="width:${t.popularity}%"></div></div>
-            <div class="pop-label">${t.popularity}% popularidad</div>
-          </div>
+
         </a>`;
       }).join('')}</div>`;
 
@@ -543,10 +547,7 @@
             <div class="track-name">${a.name}</div>
             <div class="track-artist">${genre}${followers ? ' · ' + followers : ''}</div>
           </div>
-          <div class="pop-wrap">
-            <div class="pop-bar-bg"><div class="pop-bar" style="width:${a.popularity || 0}%"></div></div>
-            <div class="pop-label">${a.popularity || 0}% popularidad</div>
-          </div>
+
         </a>`;
       }).join('')}</div>`;
 
