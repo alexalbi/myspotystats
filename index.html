@@ -253,6 +253,8 @@
     }
 
     .track-item:hover { background: var(--bg-secondary); }
+    .track-item.clickable { cursor: pointer; }
+    .track-item.clickable:hover .track-name { color: var(--green); }
 
     .track-rank { font-size: 12px; color: var(--text-tertiary); min-width: 22px; text-align: center; font-weight: 600; }
     .track-img { width: 42px; height: 42px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
@@ -328,6 +330,7 @@
   const CLIENT_ID = '28ca6f900b2a4af189988ba5f533cd46';
   const REDIRECT_URI = window.location.origin + window.location.pathname;
   const SCOPES = 'user-read-recently-played user-top-read user-read-currently-playing user-read-private';
+  const SCOPES_VERSION = 'v4'; // bump this to force re-login when scopes change
 
   let accessToken = null;
   let currentTab = 'tracks';
@@ -375,6 +378,7 @@
       accessToken = data.access_token;
       sessionStorage.setItem('spotify_token', accessToken);
       sessionStorage.setItem('spotify_token_exp', Date.now() + data.expires_in * 1000);
+      sessionStorage.setItem('scopes_version', SCOPES_VERSION);
       window.history.replaceState({}, '', window.location.pathname);
       return true;
     }
@@ -427,14 +431,7 @@
     ]);
     if (!profile) return;
 
-    // Fetch real audio features for top tracks
-    let audioFeatures = null;
-    if (topTracks && topTracks.items && topTracks.items.length) {
-      const ids = topTracks.items.map(t => t.id).join(',');
-      audioFeatures = await spotifyGet('/audio-features?ids=' + ids);
-    }
-
-    userData = { profile, topTracks, topArtists, recent, playing, audioFeatures };
+    userData = { profile, topTracks, topArtists, recent, playing };
     renderDashboard();
   }
 
@@ -483,12 +480,14 @@
 
     const tabsHtml = `
       <div class="tabs">
-        <button class="tab ${currentTab === 'tracks' ? 'active' : ''}" onclick="setTab('tracks')">Top Tracks</button>
+        <button class="tab ${currentTab === 'tracks' ? 'active' : ''}" onclick="setTab('tracks')">Tracks</button>
         <button class="tab ${currentTab === 'artists' ? 'active' : ''}" onclick="setTab('artists')">Artistas</button>
+        <button class="tab ${currentTab === 'albums' ? 'active' : ''}" onclick="setTab('albums')">Álbumes</button>
+        <button class="tab ${currentTab === 'genres' ? 'active' : ''}" onclick="setTab('genres')">Géneros</button>
         <button class="tab ${currentTab === 'recent' ? 'active' : ''}" onclick="setTab('recent')">Recientes</button>
         <button class="tab ${currentTab === 'taste' ? 'active' : ''}" onclick="setTab('taste')">Tu gusto</button>
       </div>
-      <div style="display:${currentTab === 'recent' ? 'none' : 'flex'}; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:8px;">
+      <div style="display:${(currentTab === 'recent' || currentTab === 'genres') ? 'none' : 'flex'}; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:8px;">
         <div class="period-btns" style="margin-bottom:0">
           <button class="period-btn ${currentPeriod === 'short_term' ? 'active' : ''}" onclick="setPeriod('short_term')">4 semanas</button>
           <button class="period-btn ${currentPeriod === 'medium_term' ? 'active' : ''}" onclick="setPeriod('medium_term')">6 meses</button>
@@ -511,7 +510,8 @@
         const img = t.album.images[0]
           ? `<img class="track-img" src="${t.album.images[1]?.url || t.album.images[0].url}">`
           : `<div class="track-img-ph"><i class="ti ti-music" style="font-size:16px;color:var(--text-tertiary)"></i></div>`;
-        return `<div class="track-item">
+        const spotifyUrl = t.uri ? `https://open.spotify.com/track/${t.id}` : (t.external_urls?.spotify || '');
+        return `<a class="track-item clickable" href="${spotifyUrl}" target="_blank" rel="noopener" style="text-decoration:none">
           <span class="track-rank">${i + 1}</span>
           ${img}
           <div class="track-info">
@@ -522,7 +522,7 @@
             <div class="pop-bar-bg"><div class="pop-bar" style="width:${t.popularity}%"></div></div>
             <div class="pop-label">${t.popularity}% popularidad</div>
           </div>
-        </div>`;
+        </a>`;
       }).join('')}</div>`;
 
     } else if (currentTab === 'artists' && topArtists && topArtists.items) {
@@ -535,7 +535,8 @@
         const imgPh = `<div class="track-img-ph" style="border-radius:50%;${imgSrc ? 'display:none' : ''}"><i class="ti ti-user" style="font-size:16px;color:var(--text-tertiary)"></i></div>`;
         const genre = (a.genres || [])[0] || 'Artista';
         const followers = a.followers?.total ? a.followers.total.toLocaleString('es-ES') + ' seguidores' : '';
-        return `<div class="track-item">
+        const artistUrl = a.external_urls?.spotify || '';
+        return `<a class="track-item clickable" href="${artistUrl}" target="_blank" rel="noopener" style="text-decoration:none">
           <span class="track-rank">${i + 1}</span>
           ${img}${imgPh}
           <div class="track-info">
@@ -546,7 +547,7 @@
             <div class="pop-bar-bg"><div class="pop-bar" style="width:${a.popularity || 0}%"></div></div>
             <div class="pop-label">${a.popularity || 0}% popularidad</div>
           </div>
-        </div>`;
+        </a>`;
       }).join('')}</div>`;
 
     } else if (currentTab === 'recent' && recent && recent.items) {
@@ -559,7 +560,8 @@
         const played = new Date(item.played_at);
         const timeStr = played.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
           + ' · ' + played.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
-        return `<div class="track-item">
+        const recentUrl = t.external_urls?.spotify || '';
+        return `<a class="track-item clickable" href="${recentUrl}" target="_blank" rel="noopener" style="text-decoration:none">
           <span class="track-rank" style="font-size:10px">${i + 1}</span>
           ${img}
           <div class="track-info">
@@ -567,45 +569,128 @@
             <div class="track-artist">${t.artists.map(a => a.name).join(', ')}</div>
           </div>
           <div class="time-label">${timeStr}</div>
-        </div>`;
+        </a>`;
       }).join('')}</div>`;
 
-    } else if (currentTab === 'taste') {
-      const audioFeatures = [
-        { key: 'danceability', label: 'Bailabilidad', icon: 'ti-brand-spotify' },
-        { key: 'energy', label: 'Energía', icon: 'ti-bolt' },
-        { key: 'valence', label: 'Positividad', icon: 'ti-sun' },
-        { key: 'acousticness', label: 'Acústica', icon: 'ti-music' },
-        { key: 'instrumentalness', label: 'Instrumental', icon: 'ti-device-audio-tape' },
-        { key: 'speechiness', label: 'Spoken word', icon: 'ti-microphone' },
-      ];
-
-      const avgFeatures = {};
-      const featureData = userData.audioFeatures?.audio_features?.filter(Boolean) || [];
-      audioFeatures.forEach(f => {
-        if (featureData.length) {
-          const vals = featureData.map(af => af[f.key] || 0);
-          avgFeatures[f.key] = vals.reduce((a, b) => a + b, 0) / vals.length;
-        } else {
-          avgFeatures[f.key] = 0;
+    } else if (currentTab === 'albums') {
+      // Build albums from top tracks
+      const albumMap = {};
+      (topTracks?.items || []).forEach(t => {
+        const alb = t.album;
+        if (!alb) return;
+        if (!albumMap[alb.id]) {
+          albumMap[alb.id] = {
+            id: alb.id,
+            name: alb.name,
+            artist: t.artists?.map(a => a.name).join(', ') || '',
+            image: alb.images?.[1]?.url || alb.images?.[0]?.url || null,
+            url: alb.external_urls?.spotify || '',
+            year: alb.release_date?.substring(0, 4) || '',
+            count: 0
+          };
         }
+        albumMap[alb.id].count++;
       });
+      const albumList = Object.values(albumMap).sort((a, b) => b.count - a.count).slice(0, displayLimit);
+
+      if (albumList.length === 0) {
+        mainContent = `<div style="text-align:center;padding:3rem;color:var(--text-secondary);font-size:14px">No hay datos de álbumes disponibles</div>`;
+      } else {
+        mainContent = `<div class="track-list">${albumList.map((alb, i) => {
+          const img = alb.image
+            ? `<img class="track-img" src="${alb.image}" style="border-radius:6px">`
+            : `<div class="track-img-ph"><i class="ti ti-vinyl" style="font-size:16px;color:var(--text-tertiary)"></i></div>`;
+          const maxCount = albumList[0].count;
+          return `<a class="track-item clickable" href="${alb.url}" target="_blank" rel="noopener" style="text-decoration:none">
+            <span class="track-rank">${i + 1}</span>
+            ${img}
+            <div class="track-info">
+              <div class="track-name">${alb.name}</div>
+              <div class="track-artist">${alb.artist}${alb.year ? ' · ' + alb.year : ''}</div>
+            </div>
+            <div class="pop-wrap">
+              <div class="pop-bar-bg"><div class="pop-bar" style="width:${Math.round(alb.count/maxCount*100)}%"></div></div>
+              <div class="pop-label">${alb.count} track${alb.count > 1 ? 's' : ''}</div>
+            </div>
+          </a>`;
+        }).join('')}</div>`;
+      }
+
+    } else if (currentTab === 'genres') {
+      // Build genres from top artists
+      const genreMap = {};
+      (topArtists?.items || []).forEach((a, artistIndex) => {
+        (a.genres || []).forEach(g => {
+          if (!genreMap[g]) genreMap[g] = { name: g, count: 0, artists: [] };
+          genreMap[g].count++;
+          if (genreMap[g].artists.length < 3) genreMap[g].artists.push(a.name);
+        });
+      });
+      const genreList = Object.values(genreMap).sort((a, b) => b.count - a.count).slice(0, 20);
+      const maxGenreCount = genreList[0]?.count || 1;
+
+      if (genreList.length === 0) {
+        mainContent = `<div style="text-align:center;padding:3rem;color:var(--text-secondary);font-size:14px">No hay datos de géneros disponibles</div>`;
+      } else {
+        mainContent = `<div class="track-list">${genreList.map((g, i) => {
+          const pct = Math.round(g.count / maxGenreCount * 100);
+          const colors = ['#1DB954','#1ed760','#17a349','#148a3e','#106e31'];
+          const color = colors[Math.min(i, colors.length - 1)];
+          return `<div class="track-item">
+            <span class="track-rank">${i + 1}</span>
+            <div style="width:42px;height:42px;border-radius:8px;background:${color}22;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <i class="ti ti-music" style="font-size:18px;color:${color}"></i>
+            </div>
+            <div class="track-info">
+              <div class="track-name" style="text-transform:capitalize">${g.name}</div>
+              <div class="track-artist">${g.artists.join(', ')}</div>
+            </div>
+            <div class="pop-wrap">
+              <div class="pop-bar-bg"><div class="pop-bar" style="width:${pct}%;background:${color}"></div></div>
+              <div class="pop-label">${g.count} artista${g.count > 1 ? 's' : ''}</div>
+            </div>
+          </div>`;
+        }).join('')}</div>`;
+      }
+
+    } else if (currentTab === 'taste') {
+      // Stats from available data
+      const items = topTracks?.items || [];
+      const avgDurMin = items.length ? (items.reduce((s,t) => s+(t.duration_ms||0),0)/items.length/60000).toFixed(1) : '—';
+      const avgPopVal = items.length ? Math.round(items.reduce((s,t) => s+(t.popularity||0),0)/items.length) : 0;
+      const explicit = items.length ? Math.round(items.filter(t=>t.explicit).length/items.length*100) : 0;
+      const decades = {};
+      items.forEach(t => {
+        const year = t.album?.release_date?.substring(0,4);
+        if (year) { const dec = Math.floor(parseInt(year)/10)*10; decades[dec] = (decades[dec]||0)+1; }
+      });
+      const topDecade = Object.entries(decades).sort((a,b)=>b[1]-a[1])[0];
 
       mainContent = `
         <div class="section-title">Géneros favoritos</div>
         <div class="genre-list">
           ${topGenres.map((g, i) => `<span class="genre-pill ${i < 3 ? 'top' : ''}">${g[0]}</span>`).join('')}
         </div>
-        <div class="section-title">Características de tu música</div>
+        <div class="section-title" style="margin-top:1.5rem">Estadísticas de tus top tracks</div>
         <div class="audio-grid">
-          ${audioFeatures.map(f => {
-            const val = avgFeatures[f.key] || 0;
-            return `<div class="audio-card">
-              <div class="audio-name"><i class="ti ${f.icon}" style="font-size:14px"></i>${f.label}</div>
-              <div class="audio-bar-bg"><div class="audio-bar" style="width:${Math.round(val * 100)}%"></div></div>
-              <div class="audio-val">${Math.round(val * 100)}%</div>
-            </div>`;
-          }).join('')}
+          <div class="audio-card">
+            <div class="audio-name">Duración media</div>
+            <div class="audio-val">${avgDurMin} min</div>
+          </div>
+          <div class="audio-card">
+            <div class="audio-name">Popularidad media</div>
+            <div class="audio-bar-bg" style="margin:6px 0"><div class="audio-bar" style="width:${avgPopVal}%"></div></div>
+            <div class="audio-val">${avgPopVal}/100</div>
+          </div>
+          <div class="audio-card">
+            <div class="audio-name">Canciones explícitas</div>
+            <div class="audio-bar-bg" style="margin:6px 0"><div class="audio-bar" style="width:${explicit}%"></div></div>
+            <div class="audio-val">${explicit}%</div>
+          </div>
+          <div class="audio-card">
+            <div class="audio-name">Década favorita</div>
+            <div class="audio-val">${topDecade ? topDecade[0]+'s' : '—'}</div>
+          </div>
         </div>`;
     }
 
@@ -667,7 +752,7 @@
       renderLoading();
       const ok = await exchangeCode(code);
       if (ok) { loadAndRender(); } else { renderConnect(); }
-    } else if (storedToken && tokenExp && Date.now() < parseInt(tokenExp)) {
+    } else if (storedToken && tokenExp && Date.now() < parseInt(tokenExp) && sessionStorage.getItem('scopes_version') === SCOPES_VERSION) {
       accessToken = storedToken;
       loadAndRender();
     } else {
