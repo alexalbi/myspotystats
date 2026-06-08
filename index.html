@@ -428,17 +428,7 @@
     ]);
     if (!profile) return;
 
-    // Enrich artists with full data (includes genres) using /artists endpoint
-    let enrichedTopArtists = topArtists;
-    if (topArtists?.items?.length) {
-      const ids = topArtists.items.map(a => a.id).join(',');
-      const enriched = await spotifyGet('/artists?ids=' + ids);
-      if (enriched?.artists) {
-        enrichedTopArtists = { ...topArtists, items: enriched.artists };
-      }
-    }
-
-    userData = { profile, topTracks, topArtists: enrichedTopArtists, recent, playing };
+    userData = { profile, topTracks, topArtists, recent, playing };
     renderDashboard();
   }
 
@@ -490,15 +480,14 @@
         <button class="tab ${currentTab === 'tracks' ? 'active' : ''}" onclick="setTab('tracks')">Tracks</button>
         <button class="tab ${currentTab === 'artists' ? 'active' : ''}" onclick="setTab('artists')">Artistas</button>
         <button class="tab ${currentTab === 'albums' ? 'active' : ''}" onclick="setTab('albums')">Álbumes</button>
-        <button class="tab ${currentTab === 'genres' ? 'active' : ''}" onclick="setTab('genres')">Géneros</button>
         <button class="tab ${currentTab === 'recent' ? 'active' : ''}" onclick="setTab('recent')">Recientes</button>
         <button class="tab ${currentTab === 'taste' ? 'active' : ''}" onclick="setTab('taste')">Tu gusto</button>
       </div>
-      <div style="display:${(currentTab === 'recent' || currentTab === 'genres') ? 'none' : 'flex'}; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:8px;">
+      <div style="display:${currentTab === 'recent' ? 'none' : 'flex'}; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:8px;">
         <div class="period-btns" style="margin-bottom:0">
           <button class="period-btn ${currentPeriod === 'short_term' ? 'active' : ''}" onclick="setPeriod('short_term')">4 semanas</button>
           <button class="period-btn ${currentPeriod === 'medium_term' ? 'active' : ''}" onclick="setPeriod('medium_term')">6 meses</button>
-          <button class="period-btn ${currentPeriod === 'long_term' ? 'active' : ''}" onclick="setPeriod('long_term')" title="Datos de los últimos 1-2 años aprox. Es el máximo que ofrece la API de Spotify.">Largo plazo ⓘ</button>
+          <button class="period-btn ${currentPeriod === 'long_term' ? 'active' : ''}" onclick="setPeriod('long_term')" title="Aproximadamente el último año. Es el máximo que ofrece la API de Spotify.">~1 año ⓘ</button>
         </div>
         <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)">
           Mostrar
@@ -513,7 +502,11 @@
     let mainContent = '';
 
     if (currentTab === 'tracks' && topTracks && topTracks.items) {
-      mainContent = `<div class="track-list">${topTracks.items.slice(0, displayLimit).map((t, i) => {
+      const tracksBanner = `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg-secondary);margin-bottom:1rem;font-size:12px;color:var(--text-secondary);line-height:1.6">
+        <span style="font-size:16px;flex-shrink:0">ℹ️</span>
+        <div>Los períodos son aproximaciones calculadas por Spotify. Para ver tu historial real completo con filtros por fecha, <a href="https://www.spotify.com/account/privacy/" target="_blank" style="color:var(--green);text-decoration:none">solicita tu historial extendido</a> — tarda entre 5 y 30 días.</div>
+      </div>`;
+      mainContent = tracksBanner + `<div class="track-list">${topTracks.items.slice(0, displayLimit).map((t, i) => {
         const img = t.album.images[0]
           ? `<img class="track-img" src="${t.album.images[1]?.url || t.album.images[0].url}">`
           : `<div class="track-img-ph"><i class="ti ti-music" style="font-size:16px;color:var(--text-tertiary)"></i></div>`;
@@ -530,7 +523,11 @@
       }).join('')}</div>`;
 
     } else if (currentTab === 'artists' && topArtists && topArtists.items) {
-      mainContent = `<div class="track-list">${topArtists.items.slice(0, displayLimit).map((a, i) => {
+      const artistsBanner = `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg-secondary);margin-bottom:1rem;font-size:12px;color:var(--text-secondary);line-height:1.6">
+        <span style="font-size:16px;flex-shrink:0">ℹ️</span>
+        <div>Los períodos son aproximaciones calculadas por Spotify. Para ver tu historial real completo con filtros por fecha, <a href="https://www.spotify.com/account/privacy/" target="_blank" style="color:var(--green);text-decoration:none">solicita tu historial extendido</a> — tarda entre 5 y 30 días.</div>
+      </div>`;
+      mainContent = artistsBanner + `<div class="track-list">${topArtists.items.slice(0, displayLimit).map((a, i) => {
         const images = a.images || [];
         const imgSrc = images.length > 0 ? (images.find(img => img.width <= 160)?.url || images[images.length-1].url) : null;
         const img = imgSrc
@@ -600,10 +597,15 @@
       const albumList = Object.values(albumMap).sort((a, b) => b.scoreSum - a.scoreSum).slice(0, displayLimit);
       const maxAlbumScore = albumList[0]?.scoreSum || 1;
 
+      const albumBanner = `<div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg-secondary);margin-bottom:1rem;font-size:12px;color:var(--text-secondary);line-height:1.6">
+        <span style="font-size:16px;flex-shrink:0">⚠️</span>
+        <div><strong style="color:var(--text-primary)">Funcionalidad limitada.</strong> Los álbumes se infieren de tus top tracks actuales. Para ver tus álbumes más escuchados reales con filtros por fecha (4 semanas, 6 meses, 1 año, historial completo), necesitas subir tu historial extendido de Spotify. <a href="https://www.spotify.com/account/privacy/" target="_blank" style="color:var(--green);text-decoration:none">Solicitarlo aquí</a> — tarda entre 5 y 30 días.</div>
+      </div>`;
+
       if (albumList.length === 0) {
-        mainContent = `<div style="text-align:center;padding:3rem;color:var(--text-secondary);font-size:14px">No hay datos de álbumes disponibles</div>`;
+        mainContent = albumBanner + `<div style="text-align:center;padding:3rem;color:var(--text-secondary);font-size:14px">No hay datos de álbumes disponibles</div>`;
       } else {
-        mainContent = `<div class="track-list">${albumList.map((alb, i) => {
+        mainContent = albumBanner + `<div class="track-list">${albumList.map((alb, i) => {
           const img = alb.image
             ? `<img class="track-img" src="${alb.image}" style="border-radius:6px">`
             : `<div class="track-img-ph"><i class="ti ti-vinyl" style="font-size:16px;color:var(--text-tertiary)"></i></div>`;
@@ -620,44 +622,6 @@
               <div class="pop-label">${alb.count} track${alb.count > 1 ? 's' : ''}</div>
             </div>
           </a>`;
-        }).join('')}</div>`;
-      }
-
-    } else if (currentTab === 'genres') {
-      // Build genres from top artists - use userData explicitly
-      const genreArtists = userData.topArtists?.items || [];
-      const genreMap = {};
-      genreArtists.forEach((a, artistIndex) => {
-        (a.genres || []).forEach(g => {
-          if (!genreMap[g]) genreMap[g] = { name: g, count: 0, artists: [] };
-          genreMap[g].count++;
-          if (genreMap[g].artists.length < 3) genreMap[g].artists.push(a.name);
-        });
-      });
-      const genreList = Object.values(genreMap).sort((a, b) => b.count - a.count).slice(0, 20);
-      const maxGenreCount = genreList[0]?.count || 1;
-
-      if (genreList.length === 0) {
-        mainContent = `<div style="text-align:center;padding:3rem;color:var(--text-secondary);font-size:14px">No hay datos de géneros disponibles</div>`;
-      } else {
-        mainContent = `<div class="track-list">${genreList.map((g, i) => {
-          const pct = Math.round(g.count / maxGenreCount * 100);
-          const colors = ['#1DB954','#1ed760','#17a349','#148a3e','#106e31'];
-          const color = colors[Math.min(i, colors.length - 1)];
-          return `<div class="track-item">
-            <span class="track-rank">${i + 1}</span>
-            <div style="width:42px;height:42px;border-radius:8px;background:${color}22;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-              <i class="ti ti-music" style="font-size:18px;color:${color}"></i>
-            </div>
-            <div class="track-info">
-              <div class="track-name" style="text-transform:capitalize">${g.name}</div>
-              <div class="track-artist">${g.artists.join(', ')}</div>
-            </div>
-            <div class="pop-wrap">
-              <div class="pop-bar-bg"><div class="pop-bar" style="width:${pct}%;background:${color}"></div></div>
-              <div class="pop-label">${g.count} artista${g.count > 1 ? 's' : ''}</div>
-            </div>
-          </div>`;
         }).join('')}</div>`;
       }
 
