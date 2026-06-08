@@ -510,7 +510,7 @@
         const img = t.album.images[0]
           ? `<img class="track-img" src="${t.album.images[1]?.url || t.album.images[0].url}">`
           : `<div class="track-img-ph"><i class="ti ti-music" style="font-size:16px;color:var(--text-tertiary)"></i></div>`;
-        const spotifyUrl = t.uri ? `https://open.spotify.com/track/${t.id}` : (t.external_urls?.spotify || '');
+        const spotifyUrl = t.album?.external_urls?.spotify || t.external_urls?.spotify || '';
         return `<a class="track-item clickable" href="${spotifyUrl}" target="_blank" rel="noopener" style="text-decoration:none">
           <span class="track-rank">${i + 1}</span>
           ${img}
@@ -560,7 +560,7 @@
         const played = new Date(item.played_at);
         const timeStr = played.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
           + ' · ' + played.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
-        const recentUrl = t.external_urls?.spotify || '';
+        const recentUrl = t.album?.external_urls?.spotify || t.external_urls?.spotify || '';
         return `<a class="track-item clickable" href="${recentUrl}" target="_blank" rel="noopener" style="text-decoration:none">
           <span class="track-rank" style="font-size:10px">${i + 1}</span>
           ${img}
@@ -573,9 +573,9 @@
       }).join('')}</div>`;
 
     } else if (currentTab === 'albums') {
-      // Build albums from top tracks
+      // Build albums ranked by best average position of their tracks in the top list
       const albumMap = {};
-      (topTracks?.items || []).forEach(t => {
+      (topTracks?.items || []).forEach((t, idx) => {
         const alb = t.album;
         if (!alb) return;
         if (!albumMap[alb.id]) {
@@ -586,12 +586,18 @@
             image: alb.images?.[1]?.url || alb.images?.[0]?.url || null,
             url: alb.external_urls?.spotify || '',
             year: alb.release_date?.substring(0, 4) || '',
-            count: 0
+            count: 0,
+            scoreSum: 0,
+            bestPos: idx
           };
         }
         albumMap[alb.id].count++;
+        albumMap[alb.id].scoreSum += (topTracks.items.length - idx); // higher score for earlier positions
+        albumMap[alb.id].bestPos = Math.min(albumMap[alb.id].bestPos, idx);
       });
-      const albumList = Object.values(albumMap).sort((a, b) => b.count - a.count).slice(0, displayLimit);
+      // Sort by total score (sum of inverse positions)
+      const albumList = Object.values(albumMap).sort((a, b) => b.scoreSum - a.scoreSum).slice(0, displayLimit);
+      const maxAlbumScore = albumList[0]?.scoreSum || 1;
 
       if (albumList.length === 0) {
         mainContent = `<div style="text-align:center;padding:3rem;color:var(--text-secondary);font-size:14px">No hay datos de álbumes disponibles</div>`;
@@ -617,9 +623,10 @@
       }
 
     } else if (currentTab === 'genres') {
-      // Build genres from top artists
+      // Build genres from top artists - use userData explicitly
+      const genreArtists = userData.topArtists?.items || [];
       const genreMap = {};
-      (topArtists?.items || []).forEach((a, artistIndex) => {
+      genreArtists.forEach((a, artistIndex) => {
         (a.genres || []).forEach(g => {
           if (!genreMap[g]) genreMap[g] = { name: g, count: 0, artists: [] };
           genreMap[g].count++;
