@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>mystats.fm</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -122,6 +123,24 @@
     .loading { text-align: center; padding: 4rem; color: var(--text-secondary); font-size: 14px; }
     .spinner { width: 32px; height: 32px; border: 2px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 1rem; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Charts */
+    .chart-section { margin-bottom: 2rem; }
+    .chart-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem; }
+    .chart-subtitle { font-size: 12px; color: var(--text-secondary); margin-bottom: 1rem; }
+    .chart-wrap { background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1.25rem; overflow: hidden; }
+    canvas { max-width: 100%; }
+
+    /* Heatmap */
+    .heatmap { display: grid; grid-template-columns: 40px repeat(24, 1fr); gap: 2px; font-size: 10px; }
+    .heatmap-cell { aspect-ratio: 1; border-radius: 2px; }
+    .heatmap-label { display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }
+    .heatmap-hour-labels { display: grid; grid-template-columns: 40px repeat(24, 1fr); gap: 2px; margin-bottom: 4px; }
+
+    /* Year comparison */
+    .year-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 1rem; }
+    .year-pill { font-size: 12px; padding: 4px 12px; border: 1px solid var(--border-strong); border-radius: 999px; cursor: pointer; background: none; color: var(--text-secondary); transition: all 0.15s; }
+    .year-pill.active { background: var(--green); color: white; border-color: var(--green); }
   </style>
 </head>
 <body>
@@ -154,6 +173,8 @@
   let historyData = null;
   let historyDateFrom = null;
   let historyDateTo = null;
+  let selectedYears = [];
+  let chartInstances = {};
 
   // ── Auth ──────────────────────────────────────────────────────────
   async function pkceChallengeFromVerifier(v) {
@@ -452,8 +473,10 @@
       : `<div class="history-upload-bar"><label class="history-upload-label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Subir historial extendido de Spotify (múltiples .json)<input type="file" accept=".json" multiple style="display:none" onchange="processHistoryFiles(this.files)"></label></div>`;
 
     // Tabs
-    const tabs = ['tracks','artists','albums','recent','taste'];
-    const tabLabels = { tracks:'Tracks', artists:'Artistas', albums:'Álbumes', recent:'Recientes', taste:'Tu gusto' };
+    const tabs = historyData
+      ? ['tracks','artists','albums','estadisticas','recent','taste']
+      : ['tracks','artists','albums','recent','taste'];
+    const tabLabels = { tracks:'Tracks', artists:'Artistas', albums:'Álbumes', recent:'Recientes', taste:'Tu gusto', estadisticas:'📊 Estadísticas' };
     const tabsHtml = `<div class="tabs">${tabs.map(t => `<button class="tab ${currentTab===t?'active':''}" onclick="setTab('${t}')">${tabLabels[t]}</button>`).join('')}</div>`;
 
     // Controls bar (period + limit) - hidden for recent tab
@@ -567,6 +590,56 @@
         }).join('')}</div>`;
       }
 
+    } else if (currentTab === 'estadisticas') {
+      if (!historyData) {
+        mainContent = `<div class="banner"><span>ℹ️</span><div>Sube tu historial extendido para ver las estadísticas.</div></div>`;
+      } else {
+        const allYears = getYearsInHistory();
+        if (selectedYears.length === 0) selectedYears = allYears.slice(-3);
+        const s = getHistoryStats();
+        const topHour = (() => {
+          const hours = Array(24).fill(0);
+          getFilteredHistory().forEach(e => hours[new Date(e.ts).getHours()] += e.ms_played||0);
+          const max = hours.indexOf(Math.max(...hours));
+          return max + 'h';
+        })();
+        const topDay = (() => {
+          const days = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+          const counts = Array(7).fill(0);
+          getFilteredHistory().forEach(e => counts[(new Date(e.ts).getDay()+6)%7] += e.ms_played||0);
+          return days[counts.indexOf(Math.max(...counts))];
+        })();
+
+        mainContent = `
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:1.5rem">
+            <div class="stat-card"><div class="stat-label">Total escuchado</div><div class="stat-value" style="font-size:20px">${formatMs(s.totalMs)}</div></div>
+            <div class="stat-card"><div class="stat-label">Total plays</div><div class="stat-value" style="font-size:20px">${s.plays.toLocaleString('es-ES')}</div></div>
+            <div class="stat-card"><div class="stat-label">Hora favorita</div><div class="stat-value" style="font-size:20px">${topHour}</div></div>
+            <div class="stat-card"><div class="stat-label">Día favorito</div><div class="stat-value" style="font-size:20px">${topDay}</div></div>
+          </div>
+
+          <div class="chart-section">
+            <div class="chart-title">Horas escuchadas por mes</div>
+            <div class="chart-subtitle">Historial completo desde ${getYearsInHistory()[0]}</div>
+            <div class="chart-wrap"><canvas id="chart-monthly" height="120"></canvas></div>
+          </div>
+
+          <div class="chart-section">
+            <div class="chart-title">Comparativa por año</div>
+            <div class="chart-subtitle">Horas escuchadas por mes · selecciona años a comparar</div>
+            <div class="year-pills">${allYears.map(y => `<button class="year-pill ${selectedYears.includes(y)?'active':''}" onclick="toggleYear(${y})">${y}</button>`).join('')}</div>
+            <div class="chart-wrap"><canvas id="chart-years" height="120"></canvas></div>
+          </div>
+
+          <div class="chart-section">
+            <div class="chart-title">Mapa de calor</div>
+            <div class="chart-subtitle">Cuándo escuchas más música · día × hora</div>
+            <div class="chart-wrap"><div id="heatmap-grid"></div></div>
+          </div>`;
+
+        setTimeout(renderCharts, 50);
+      }
+
     } else if (currentTab === 'taste') {
       const genres = {};
       (topArtists?.items || []).forEach(a => (a.genres||[]).forEach(g => { genres[g]=(genres[g]||0)+1; }));
@@ -607,9 +680,155 @@
     if (historyData) updateHistoryControls();
   }
 
-  function setTab(tab) { currentTab = tab; renderDashboard(); }
+  function setTab(tab) { destroyCharts(); currentTab = tab; renderDashboard(); }
+
+  // ── Chart helpers ─────────────────────────────────────────────────
+  function destroyCharts() {
+    Object.values(chartInstances).forEach(c => { try { c.destroy(); } catch(e){} });
+    chartInstances = {};
+  }
+
+  function getYearsInHistory() {
+    if (!historyData) return [];
+    const years = new Set(historyData.map(e => new Date(e.ts).getFullYear()));
+    return [...years].sort();
+  }
+
+  function getMonthlyData(years) {
+    const map = {};
+    getFilteredHistory().filter(e => {
+      const y = new Date(e.ts).getFullYear();
+      return years.length === 0 || years.includes(y);
+    }).forEach(e => {
+      const d = new Date(e.ts);
+      const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+      if (!map[key]) map[key] = { ms: 0, plays: 0 };
+      map[key].ms += e.ms_played || 0;
+      map[key].plays++;
+    });
+    return map;
+  }
+
+  function getHeatmapData() {
+    const days = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+    const grid = Array(7).fill(null).map(() => Array(24).fill(0));
+    getFilteredHistory().forEach(e => {
+      const d = new Date(e.ts);
+      const dow = (d.getDay() + 6) % 7; // Mon=0
+      const hour = d.getHours();
+      grid[dow][hour]++;
+    });
+    return { grid, days };
+  }
+
+  function renderCharts() {
+    destroyCharts();
+    const allYears = getYearsInHistory();
+    if (selectedYears.length === 0) selectedYears = allYears.slice(-3);
+
+    // Monthly plays chart
+    const monthlyMap = getMonthlyData([]);
+    const allMonths = Object.keys(monthlyMap).sort();
+    const monthLabels = allMonths.map(m => {
+      const [y, mo] = m.split('-');
+      return ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(mo)-1] + ' ' + y.slice(2);
+    });
+
+    const ctx1 = document.getElementById('chart-monthly');
+    if (ctx1) {
+      chartInstances.monthly = new Chart(ctx1, {
+        type: 'bar',
+        data: {
+          labels: monthLabels,
+          datasets: [{
+            label: 'Horas escuchadas',
+            data: allMonths.map(m => Math.round((monthlyMap[m]?.ms || 0) / 3600000 * 10) / 10),
+            backgroundColor: 'rgba(29,185,84,0.7)',
+            borderColor: '#1DB954',
+            borderWidth: 1,
+            borderRadius: 3,
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ctx.parsed.y + 'h escuchadas' } } },
+          scales: {
+            x: { ticks: { maxTicksLimit: 12, color: '#888', font: { size: 10 } }, grid: { display: false } },
+            y: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: 'rgba(128,128,128,0.1)' } }
+          }
+        }
+      });
+    }
+
+    // Year comparison chart
+    const ctx2 = document.getElementById('chart-years');
+    if (ctx2 && selectedYears.length > 0) {
+      const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+      const colors = ['#1DB954','#1ed760','#17a349','#0d7a32','#64d98a','#a8f0be'];
+      const datasets = selectedYears.map((year, i) => {
+        const data = Array(12).fill(0);
+        getFilteredHistory().filter(e => new Date(e.ts).getFullYear() === year).forEach(e => {
+          const mo = new Date(e.ts).getMonth();
+          data[mo] += (e.ms_played || 0) / 3600000;
+        });
+        return {
+          label: String(year),
+          data: data.map(v => Math.round(v * 10) / 10),
+          borderColor: colors[i % colors.length],
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 3,
+          tension: 0.3,
+        };
+      });
+      chartInstances.years = new Chart(ctx2, {
+        type: 'line',
+        data: { labels: months, datasets },
+        options: {
+          responsive: true,
+          plugins: { legend: { labels: { color: '#888', font: { size: 11 } } }, tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + ctx.parsed.y + 'h' } } },
+          scales: {
+            x: { ticks: { color: '#888', font: { size: 10 } }, grid: { display: false } },
+            y: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: 'rgba(128,128,128,0.1)' } }
+          }
+        }
+      });
+    }
+
+    // Heatmap
+    const heatEl = document.getElementById('heatmap-grid');
+    if (heatEl) {
+      const { grid, days } = getHeatmapData();
+      const max = Math.max(...grid.flat());
+      let html = '<div class="heatmap-hour-labels"><div></div>' + Array(24).fill(0).map((_,h) => `<div style="text-align:center;color:var(--text-tertiary);font-size:9px">${h}h</div>`).join('') + '</div>';
+      html += '<div class="heatmap">';
+      grid.forEach((row, di) => {
+        html += `<div class="heatmap-label">${days[di]}</div>`;
+        row.forEach(val => {
+          const intensity = max > 0 ? val / max : 0;
+          const alpha = 0.08 + intensity * 0.92;
+          html += `<div class="heatmap-cell" style="background:rgba(29,185,84,${alpha.toFixed(2)})" title="${val} plays"></div>`;
+        });
+      });
+      html += '</div>';
+      heatEl.innerHTML = html;
+    }
+  }
   function setPeriod(p) { currentPeriod = p; loadAndRender(); }
   function setLimit(val) { displayLimit = parseInt(val); renderDashboard(); }
+
+  function toggleYear(year) {
+    if (selectedYears.includes(year)) {
+      if (selectedYears.length > 1) selectedYears = selectedYears.filter(y => y !== year);
+    } else {
+      selectedYears = [...selectedYears, year].sort();
+    }
+    destroyCharts();
+    const allYears = getYearsInHistory();
+    const s = getHistoryStats();
+    // Re-render just the year chart and pills without full re-render
+    renderDashboard();
+  }
 
   // ── Init ──────────────────────────────────────────────────────────
   async function init() {
